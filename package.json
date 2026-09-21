@@ -1,0 +1,20 @@
+{
+  "name": "kanakku",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal finance control center — cashflow, investments, debts, tax.",
+  "scripts": {
+    "dev": "pnpm --parallel --filter ./server --filter ./web run dev",
+    "dev:server": "pnpm --filter server run dev",
+    "dev:web": "pnpm --filter web run dev",
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kanakku-postgres
+    environment:
+      POSTGRES_USER: kanakku
+      POSTGRES_PASSWORD: kanakku
+      POSTGRES_DB: kanakku
+    ports:
+      - "5433:5432"
+    volumes:
+      - kanakku_pgdata:/var/lib/postgresql/data
+
+volumes:
+  kanakku_pgdata:
