@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { ApiError } from '../../lib/http.js';
 import { signToken } from '../../lib/jwt.js';
+import { BUILTIN_CATEGORIES } from '../categories/builtin.js';
 
 export function toPublicUser(u: {
   id: string;
@@ -33,32 +34,14 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-const BUILTIN_CATEGORIES: Array<{ name: string; type: 'income' | 'expense' }> = [
-  { name: 'Salary', type: 'income' },
-  { name: 'Freelance', type: 'income' },
-  { name: 'Dividends', type: 'income' },
-  { name: 'Interest', type: 'income' },
-  { name: 'Gifts', type: 'income' },
-  { name: 'Food', type: 'expense' },
-  { name: 'Rent', type: 'expense' },
-  { name: 'Groceries', type: 'expense' },
-  { name: 'Utilities', type: 'expense' },
-  { name: 'Transport', type: 'expense' },
-  { name: 'Subscriptions', type: 'expense' },
-  { name: 'Shopping', type: 'expense' },
-  { name: 'Healthcare', type: 'expense' },
-  { name: 'Travel', type: 'expense' },
-  { name: 'Entertainment', type: 'expense' },
-  { name: 'Other', type: 'expense' },
-];
-
 export async function register(data: z.infer<typeof registerSchema>) {
-  const existing = await prisma.user.findUnique({ where: { email: data.email } });
+  const email = data.email.toLowerCase();
+  const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) throw new ApiError(409, 'Email already registered');
 
   const user = await prisma.user.create({
     data: {
-      email: data.email.toLowerCase(),
+      email,
       passwordHash: await bcrypt.hash(data.password, 10),
       name: data.name,
     },

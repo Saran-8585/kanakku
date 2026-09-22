@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { ApiError, asyncHandler, validate } from '../../lib/http.js';
 import { requireAuth } from '../../middleware/auth.js';
+import { assertNoTransactions } from '../../lib/refs.js';
 
 export const accountsRouter = Router();
 
@@ -61,6 +62,7 @@ accountsRouter.delete(
       where: { id: req.params.id, userId: req.userId! },
     });
     if (!account) throw new ApiError(404, 'Account not found');
+    await assertNoTransactions(req.userId!, { OR: [{ accountId: account.id }, { toAccountId: account.id }] });
     await prisma.account.delete({ where: { id: account.id } });
     res.status(204).end();
   }),

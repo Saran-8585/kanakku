@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../components/Toast';
 import type { Account } from '../api/types';
 
 export function SettingsPage() {
   const { user, logout } = useAuth();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data: accountsData } = useQuery({
     queryKey: ['accounts'],
@@ -15,6 +17,7 @@ export function SettingsPage() {
   const bootstrap = useMutation({
     mutationFn: () => apiPost('/categories/bootstrap'),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['categories'] }),
+    onError: (err) => toast((err as Error).message, 'error'),
   });
 
   const accounts = accountsData?.accounts ?? [];

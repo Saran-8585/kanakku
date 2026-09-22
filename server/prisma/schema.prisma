@@ -148,7 +148,8 @@ model Trade {
   fees      Float      @default(0)
   date      DateTime
   realizedGain Float?  // set on sells (negative = loss)
-  holdingPeriodDays Int? // realized gain holding days for STCG/LTCG
+  holdingPeriodDays Int? // realized gain holding days (legacy, earliest-lot)
+  gainSplit Json?      // per-lot slices [{holdingPeriodDays, gain}] on sells
 
   asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 

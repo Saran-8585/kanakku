@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost } from '../api/client';
+import { apiGet, apiPost, todayInputValue } from '../api/client';
 import type { Account, Loan } from '../api/types';
 import { useToast } from '../components/Toast';
 
 export function DebtsPage() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [newLoan, setNewLoan] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
 
-  const { data: loansData, isLoading } = useQuery({
+  const { data: loansData, isLoading, isError } = useQuery({
     queryKey: ['loans'],
     queryFn: () => apiGet<{ loans: Loan[] }>('/loans'),
   });
@@ -17,10 +19,29 @@ export function DebtsPage() {
     queryFn: () => apiGet<{ accounts: Account[] }>('/accounts'),
   });
 
+  const settle = useMutation({
+    mutationFn: ({ cardId, bankId, amount }: { cardId: string; bankId: string; amount: number }) =>
+      apiPost('/transactions', {
+        type: 'transfer',
+        accountId: cardId,
+        toAccountId: bankId,
+        amount,
+        date: todayInputValue(),
+        note: 'Card settlement',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries();
+      toast('Card settled');
+    },
+    onError: (err) => toast((err as Error).message, 'error'),
+  });
+
   const loans = loansData?.loans ?? [];
   const cards = accountsData?.accounts.filter((a) => a.type === 'card') ?? [];
+  const bank = accountsData?.accounts.find((a) => a.type === 'bank');
 
   if (isLoading) return <main className="mx-auto max-w-3xl px-4 py-6">Loading…</main>;
+  if (isError || !loansData) return <main className="mx-auto max-w-3xl px-4 py-6">Could not load debts.</main>;
 
   const totalDebt = loans.reduce((s, l) => s + l.outstanding, 0);
 
@@ -80,10 +101,18 @@ export function DebtsPage() {
             <div key={c.id} className="flex items-center justify-between py-1.5 text-sm">
               <span>{c.name}</span>
               <button
-                onClick={() => setNewLoan(true)}
+                onClick={() => {
+                  const amount = window.prompt(`Settle ${c.name} — amount to pay from bank:`);
+                  if (!amount || Number(amount) <= 0) return;
+                  if (!bank) {
+                    toast('No bank account to settle against', 'error');
+                    return;
+                  }
+                  settle.mutate({ cardId: c.id, bankId: bank.id, amount: Number(amount) });
+                }}
                 className="rounded bg-neutral-800 px-3 py-1 text-xs hover:bg-neutral-700"
               >
-                Settle
+                {settle.isPending ? 'Settling…' : 'Settle'}
               </button>
             </div>
           ))}

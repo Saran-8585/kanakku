@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { ApiError } from '../../lib/http.js';
 import { getEngine } from './jurisdictions/index.js';
+import { KNOWN_SECTIONS } from './jurisdictions/india.js';
 import type { TaxInput, TaxWorkspace } from './types.js';
 
 // Income categories treated as exempt/excluded from taxable income (e.g., gifts, dividends up to limits)
@@ -59,12 +60,18 @@ export async function getWorkspace(userId: string, jurisdiction: string, fyKey?:
     },
   });
 
-  const input: TaxInput = {
+  type GainSlice = { gain: number; holdingPeriodDays: number };
+
+const input: TaxInput = {
     grossIncome,
     exemptIncome,
     deductions: deductions.map((d) => ({ section: d.section, amount: d.amount })),
     tdsPaid,
-    realizedGains: trades.map((t) => ({ gain: t.realizedGain ?? 0, holdingPeriodDays: t.holdingPeriodDays ?? 0 })),
+    realizedGains: trades.flatMap((t): GainSlice[] => {
+      const split = (t.gainSplit ?? null) as GainSlice[] | null;
+      if (split?.length) return split;
+      return [{ gain: t.realizedGain ?? 0, holdingPeriodDays: t.holdingPeriodDays ?? 0 }];
+    }),
     fyKey: resolvedFy,
   };
 
@@ -75,6 +82,9 @@ export async function addDeduction(
   userId: string,
   data: { fyKey: string; section: string; amount: number; note?: string },
 ) {
+  if (!KNOWN_SECTIONS.includes(data.section)) {
+    throw new ApiError(400, `Unknown deduction section "${data.section}"`);
+  }
   return prisma.deduction.create({ data: { userId, ...data } });
 }
 

@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { prisma } from '../../lib/prisma.js';
-import { asyncHandler } from '../../lib/http.js';
+import { ApiError, asyncHandler } from '../../lib/http.js';
 import { requireAuth } from '../../middleware/auth.js';
+import { round2 } from '../../lib/money.js';
 import { getHoldings } from '../invest/invest.service.js';
-import { amortize } from '../debt/amortize.js';
+import { amortize, monthsSinceStart, snapshot } from '../debt/amortize.js';
 import { computeCashflow, getTransactionsForUser, monthlySeries } from '../finance/finance.service.js';
 
 export const dashboardRouter = Router();
@@ -34,10 +35,7 @@ dashboardRouter.get(
       const b = txnsByAccount.get(t.accountId) ?? 0;
       txnsByAccount.set(t.accountId, b + (t.type === 'income' ? t.amount : -t.amount));
     }
-    const cash = accounts.reduce((s, a) => {
-      const flow = a.type === 'card' ? -(txnsByAccount.get(a.id) ?? 0) : txnsByAccount.get(a.id) ?? 0;
-      return s + a.openingBalance + flow;
-    }, 0);
+    const cash = accounts.reduce((s, a) => s + a.openingBalance + (txnsByAccount.get(a.id) ?? 0), 0);
 
     const holdings = await getHoldings(user.id);
     const investmentsValue = holdings.reduce((s, h) => s + h.value, 0);
@@ -46,9 +44,9 @@ dashboardRouter.get(
     const loans = await prisma.loan.findMany({ where: { userId: user.id } });
     let debt = 0;
     for (const loan of loans) {
-      const schedule = amortize(loan);
-      const outs = schedule.rows.at(-1)?.balance ?? loan.principal;
-      debt += outs;
+      const a = amortize(loan);
+      const snap = snapshot(a.rows, monthsSinceStart(loan.startDate, now));
+      debt += snap?.outstanding ?? loan.principal;
     }
 
     const assets = cash + investmentsValue;
@@ -63,14 +61,14 @@ dashboardRouter.get(
       currency: user.baseCurrency,
       asOf: now.toISOString(),
       overview: {
-        cash,
-        investments: investmentsValue,
-        assets,
-        debt,
-        netWorth,
-        savingsRate: cf.savingsRate,
-        fyIncome: cf.income,
-        fyExpense: cf.expense,
+        cash: round2(cash),
+        investments: round2(investmentsValue),
+        assets: round2(assets),
+        debt: round2(debt),
+        netWorth: round2(netWorth),
+        savingsRate: cf.savingsRate != null ? round2(cf.savingsRate) : null,
+        fyIncome: round2(cf.income),
+        fyExpense: round2(cf.expense),
       },
       accounts: accounts.map((a) => ({ id: a.id, name: a.name, type: a.type })),
     });
@@ -87,6 +85,9 @@ dashboardRouter.get(
     const fy = computeCashflow(fyTxns);
 
     const monthsAgo = Number(req.query.months ?? 6);
+    if (!Number.isInteger(monthsAgo) || monthsAgo < 1 || monthsAgo > 60) {
+      throw new ApiError(400, 'months must be an integer between 1 and 60');
+    }
     const since = new Date(now.getFullYear(), now.getMonth() - monthsAgo + 1, 1);
     const monthTxns = await getTransactionsForUser(user.id, since, now);
     const series = monthlySeries(monthTxns, monthsAgo);

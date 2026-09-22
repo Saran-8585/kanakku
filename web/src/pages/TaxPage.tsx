@@ -4,35 +4,37 @@ import { apiGet, apiPost, fmt, fmtSigned } from '../api/client';
 import type { Deduction, TaxWorkspace } from '../api/types';
 import { useToast } from '../components/Toast';
 
-const FY = '2026-27';
-
 export function TaxPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [section, setSection] = useState('80C');
   const [amount, setAmount] = useState('');
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['tax', FY],
-    queryFn: () => apiGet<{ workspace: TaxWorkspace }>(`/tax/workspace?fy=${FY}`),
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['tax'],
+    queryFn: () =>
+      apiGet<{ jurisdiction: string; fyKey: string; regime: string; workspace: TaxWorkspace }>('/tax/workspace'),
   });
+  const fyKey = data?.fyKey ?? '';
   const { data: dedData } = useQuery({
-    queryKey: ['deductions', FY],
-    queryFn: () => apiGet<{ deductions: Deduction[] }>(`/tax/deductions?fy=${FY}`),
+    queryKey: ['deductions', fyKey],
+    queryFn: () => apiGet<{ deductions: Deduction[] }>(`/tax/deductions?fy=${fyKey}`),
+    enabled: !!fyKey,
   });
 
   const addDeduction = useMutation({
-    mutationFn: () => apiPost('/tax/deductions', { fyKey: FY, section, amount: Number(amount) }),
+    mutationFn: () => apiPost('/tax/deductions', { fyKey, section, amount: Number(amount) }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tax', FY] });
-      queryClient.invalidateQueries({ queryKey: ['deductions', FY] });
+      queryClient.invalidateQueries({ queryKey: ['tax'] });
+      queryClient.invalidateQueries({ queryKey: ['deductions', fyKey] });
       toast('Deduction added');
       setAmount('');
     },
     onError: (err) => toast((err as Error).message, 'error'),
   });
 
-  if (isLoading || !data) return <main className="mx-auto max-w-3xl px-4 py-6">Loading…</main>;
+  if (isLoading && !data) return <main className="mx-auto max-w-3xl px-4 py-6">Loading…</main>;
+  if (isError || !data) return <main className="mx-auto max-w-3xl px-4 py-6">Could not load tax workspace.</main>;
 
   const w = data.workspace;
   const deductions = dedData?.deductions ?? [];
@@ -40,8 +42,10 @@ export function TaxPage() {
   return (
     <main className="mx-auto max-w-3xl space-y-4 px-4 py-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">Tax · FY {FY}</h1>
-        <span className="rounded-full bg-neutral-800 px-3 py-1 text-xs text-neutral-400">India · new regime</span>
+        <h1 className="text-xl font-bold">Tax · FY {fyKey}</h1>
+        <span className="rounded-full bg-neutral-800 px-3 py-1 text-xs text-neutral-400">
+          {data.jurisdiction} · {data.regime} regime
+        </span>
       </div>
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">

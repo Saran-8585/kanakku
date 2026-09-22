@@ -1,0 +1,18 @@
+export const BUILTIN_CATEGORIES: Array<{ name: string; type: 'income' | 'expense' }> = [
+  { name: 'Salary', type: 'income' },
+  { name: 'Freelance', type: 'income' },
+  { name: 'Dividends', type: 'income' },
+  { name: 'Interest', type: 'income' },
+  { name: 'Gifts', type: 'income' },
+  { name: 'Food', type: 'expense' },
+  { name: 'Rent', type: 'expense' },
+  { name: 'Groceries', type: 'expense' },
+  { name: 'Utilities', type: 'expense' },
+  { name: 'Transport', type: 'expense' },
+  { name: 'Subscriptions', type: 'expense' },
+  { name: 'Shopping', type: 'expense' },
+  { name: 'Healthcare', type: 'expense' },
+  { name: 'Travel', type: 'expense' },
+  { name: 'Entertainment', type: 'expense' },
+  { name: 'Other', type: 'expense' },
+];

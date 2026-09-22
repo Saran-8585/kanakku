@@ -27,6 +27,10 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(`/api${path}`, { ...options, headers });
+  if (res.status === 401 && token) {
+    setToken(null);
+    window.location.assign('/login');
+  }
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, body.error ?? `Request failed (${res.status})`);
@@ -56,6 +60,8 @@ export function fmtPct(n: number): string {
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
 }
 
-export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+export function todayInputValue(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }

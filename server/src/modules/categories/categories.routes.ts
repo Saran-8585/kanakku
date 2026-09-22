@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { ApiError, asyncHandler, validate } from '../../lib/http.js';
 import { requireAuth } from '../../middleware/auth.js';
+import { assertNoTransactions } from '../../lib/refs.js';
+import { BUILTIN_CATEGORIES } from './builtin.js';
 
 export const categoriesRouter = Router();
 
@@ -12,25 +14,6 @@ const categorySchema = z.object({
   name: z.string().min(1),
   type: z.enum(['income', 'expense']),
 });
-
-const BUILTIN: Array<{ name: string; type: 'income' | 'expense' }> = [
-  { name: 'Salary', type: 'income' },
-  { name: 'Freelance', type: 'income' },
-  { name: 'Dividends', type: 'income' },
-  { name: 'Interest', type: 'income' },
-  { name: 'Gifts', type: 'income' },
-  { name: 'Food', type: 'expense' },
-  { name: 'Rent', type: 'expense' },
-  { name: 'Groceries', type: 'expense' },
-  { name: 'Utilities', type: 'expense' },
-  { name: 'Transport', type: 'expense' },
-  { name: 'Subscriptions', type: 'expense' },
-  { name: 'Shopping', type: 'expense' },
-  { name: 'Healthcare', type: 'expense' },
-  { name: 'Travel', type: 'expense' },
-  { name: 'Entertainment', type: 'expense' },
-  { name: 'Other', type: 'expense' },
-];
 
 categoriesRouter.get(
   '/',
@@ -47,7 +30,7 @@ categoriesRouter.post(
   '/bootstrap',
   asyncHandler(async (req, res) => {
     await prisma.$transaction(
-      BUILTIN.map((c) =>
+      BUILTIN_CATEGORIES.map((c) =>
         prisma.category.upsert({
           where: { userId_name: { userId: req.userId!, name: c.name } },
           update: {},
@@ -81,6 +64,7 @@ categoriesRouter.delete(
       where: { id: req.params.id, userId: req.userId! },
     });
     if (!category) throw new ApiError(404, 'Category not found');
+    await assertNoTransactions(req.userId!, { categoryId: category.id });
     await prisma.category.delete({ where: { id: category.id } });
     res.status(204).end();
   }),

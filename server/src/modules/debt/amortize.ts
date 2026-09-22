@@ -29,13 +29,15 @@ export function amortize(loan: Pick<Loan, 'principal' | 'interestRate' | 'tenure
   const r = loan.interestRate / 100 / 12;
   let balance = loan.principal;
   let totalInterest = 0;
+  let totalPaid = 0;
 
   const rows: AmortRow[] = [];
   for (let month = 1; month <= loan.tenureMonths && balance > 0; month++) {
     const interest = balance * r;
-    const principalPart = Math.min(emi - interest, balance);
+    const principalPart = Math.max(0, Math.min(emi - interest, balance));
     balance = Math.max(0, balance - principalPart);
     totalInterest += interest;
+    totalPaid += principalPart + interest;
 
     const d = new Date(loan.startDate);
     d.setMonth(d.getMonth() + month);
@@ -45,7 +47,7 @@ export function amortize(loan: Pick<Loan, 'principal' | 'interestRate' | 'tenure
       principalPaid: Math.round(principalPart * 100) / 100,
       interestPaid: Math.round(interest * 100) / 100,
       balance: Math.round(balance * 100) / 100,
-      totalPaid: Math.round(principalPart * month + totalInterest * 100) / 100,
+      totalPaid: Math.round(totalPaid * 100) / 100,
     });
   }
 
@@ -57,6 +59,23 @@ export function amortize(loan: Pick<Loan, 'principal' | 'interestRate' | 'tenure
   };
 }
 
+export function monthsSinceStart(startDate: Date, now: Date): number {
+  const start = new Date(startDate);
+  return Math.max(0, (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth()));
+}
+
+// Balance and interest paid "as of" monthsElapsed completed EMIs of the schedule.
+export function snapshot(rows: AmortRow[], monthsElapsed: number) {
+  if (rows.length === 0 || monthsElapsed <= 0) return null;
+  const idx = Math.min(monthsElapsed, rows.length) - 1;
+  const row = rows[idx];
+  return {
+    monthsElapsed,
+    outstanding: row.balance,
+    interestPaid: rows.slice(0, idx + 1).reduce((s, r) => s + r.interestPaid, 0),
+  };
+}
+
 export function monthsToDebtFree(
   principal: number,
   annualRatePercent: number,
@@ -64,6 +83,7 @@ export function monthsToDebtFree(
   extraPerMonth: number,
 ): { months: number; interestSaved: number } {
   const r = annualRatePercent / 100 / 12;
+  if (r > 0 && emi + extraPerMonth <= principal * r) return { months: Infinity, interestSaved: 0 };
   let balance = principal;
   let baseInterest = 0;
   const baseMonth = Math.ceil(-Math.log(1 - (principal * r) / emi) / Math.log(1 + r)) || 0;

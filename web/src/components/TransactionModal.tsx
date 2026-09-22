@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost, apiPut } from '../api/client';
+import { apiGet, apiPost, apiPut, todayInputValue } from '../api/client';
 import type { Account, Category, Transaction, TxType } from '../api/types';
 import { useToast } from './Toast';
 
 interface Props {
   onClose: () => void;
-  preset?: { type: TxType; amount?: number };
   edit?: Transaction | null;
 }
 
@@ -18,15 +17,15 @@ const TYPE_LABELS: Record<TxType, string> = {
   tax_event: 'Tax paid',
 };
 
-export function TransactionModal({ onClose, preset, edit }: Props) {
+export function TransactionModal({ onClose, edit }: Props) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [type, setType] = useState<TxType>(edit?.type ?? preset?.type ?? 'expense');
+  const [type, setType] = useState<TxType>(edit?.type ?? 'expense');
   const [accountId, setAccountId] = useState(edit?.accountId ?? '');
   const [toAccountId, setToAccountId] = useState(edit?.toAccountId ?? '');
   const [categoryId, setCategoryId] = useState(edit?.categoryId ?? '');
-  const [amount, setAmount] = useState(String(edit?.amount ?? preset?.amount ?? ''));
-  const [date, setDate] = useState((edit?.date ?? new Date().toISOString()).slice(0, 10));
+  const [amount, setAmount] = useState(String(edit?.amount ?? ''));
+  const [date, setDate] = useState((edit?.date ?? todayInputValue()).slice(0, 10));
   const [note, setNote] = useState(edit?.note ?? '');
 
   const { data: accountsData } = useQuery({
@@ -81,7 +80,10 @@ export function TransactionModal({ onClose, preset, edit }: Props) {
           {(Object.keys(TYPE_LABELS) as TxType[]).map((t) => (
             <button
               key={t}
-              onClick={() => setType(t)}
+              onClick={() => {
+                setType(t);
+                setCategoryId('');
+              }}
               className={`rounded-full px-3 py-1 text-xs ${
                 type === t ? 'bg-emerald-500 text-neutral-950' : 'bg-neutral-800 text-neutral-400'
               }`}
@@ -161,7 +163,7 @@ export function TransactionModal({ onClose, preset, edit }: Props) {
 
         <button
           onClick={() => mutation.mutate()}
-          disabled={!amount || !accountId || mutation.isPending}
+          disabled={!amount || Number(amount) <= 0 || !accountId || mutation.isPending}
           className="mt-5 w-full rounded-xl bg-emerald-500 py-2.5 font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-50"
         >
           {mutation.isPending ? 'Saving…' : 'Save transaction'}

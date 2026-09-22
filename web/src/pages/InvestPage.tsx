@@ -5,21 +5,20 @@ import { apiGet, apiPost, fmt, fmtPct } from '../api/client';
 import type { Allocation, Holding } from '../api/types';
 import { useToast } from '../components/Toast';
 
-interface HoldingRow extends Holding {
-  symbol: string;
-}
+const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#f472b6', '#a78bfa'];
 
 export function InvestPage() {
   const queryClient = useQueryClient();
-  const [trade, setTrade] = useState<null | { holding: HoldingRow; action: 'buy' | 'sell' }>(null);
+  const [trade, setTrade] = useState<null | { holding: Holding; action: 'buy' | 'sell' }>(null);
   const [showNewAsset, setShowNewAsset] = useState(false);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['portfolio'],
     queryFn: () => apiGet<{ holdings: Holding[]; allocation: Allocation }>('/assets/portfolio/holdings'),
   });
 
-  if (isLoading || !data) return <main className="mx-auto max-w-3xl px-4 py-6">Loading…</main>;
+  if (isLoading && !data) return <main className="mx-auto max-w-3xl px-4 py-6">Loading…</main>;
+  if (isError || !data) return <main className="mx-auto max-w-3xl px-4 py-6">Could not load portfolio.</main>;
 
   const { holdings, allocation } = data;
 
@@ -50,8 +49,8 @@ export function InvestPage() {
                   outerRadius={65}
                   paddingAngle={3}
                 >
-                  {['#10b981', '#3b82f6', '#f59e0b', '#f472b6', '#a78bfa'].map((color, i) => (
-                    <Cell key={i} fill={color} />
+                  {allocation.breakdown.map((b, i) => (
+                    <Cell key={b.assetClass} fill={COLORS[i % COLORS.length]} />
                   ))}
                 </Pie>
                 <Tooltip contentStyle={{ background: '#171717', border: '1px solid #404040', borderRadius: 8 }} />
@@ -164,7 +163,7 @@ function NewAssetModal({ onClose }: { onClose: () => void }) {
     mutationFn: () =>
       apiPost('/assets', { ...form, price: Number(form.price) || 0 }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
       toast(`${form.symbol} added`);
       onClose();
     },
@@ -201,7 +200,7 @@ function TradeModal({
   onClose,
   queryClient,
 }: {
-  holding: HoldingRow;
+  holding: Holding;
   action: 'buy' | 'sell';
   onClose: () => void;
   queryClient: ReturnType<typeof useQueryClient>;
@@ -241,6 +240,7 @@ function TradeModal({
       <Submit
         onClick={() => mutation.mutate()}
         label={mutation.isPending ? 'Saving…' : action === 'buy' ? 'Record buy' : 'Record sell'}
+        disabled={!qty || Number(qty) <= 0 || price === '' || Number(price) < 0 || mutation.isPending}
       />
       {mutation.isError && <p className="text-xs text-red-400">{(mutation.error as Error).message}</p>}
       {notice && (
@@ -275,11 +275,12 @@ function Title({ children }: { children: React.ReactNode }) {
   return <h2 className="text-lg font-semibold">{children}</h2>;
 }
 
-function Submit({ onClick, label }: { onClick: () => void; label: string }) {
+function Submit({ onClick, label, disabled }: { onClick: () => void; label: string; disabled?: boolean }) {
   return (
     <button
       onClick={onClick}
-      className="w-full rounded-xl bg-emerald-500 py-2.5 font-medium text-neutral-950 transition hover:bg-emerald-400"
+      disabled={disabled}
+      className="w-full rounded-xl bg-emerald-500 py-2.5 font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-50 disabled:hover:bg-emerald-500"
     >
       {label}
     </button>

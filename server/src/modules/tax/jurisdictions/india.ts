@@ -1,36 +1,45 @@
 import type { TaxEngine, TaxInput, TaxWorkspace } from '../types.js';
 
-// FY 2026-27 (AY 2027-28) — new regime slabs, India
-const SLABS: Array<{ upTo: number; rate: number }> = [
-  { upTo: 300000, rate: 0 },
-  { upTo: 700000, rate: 0.05 },
-  { upTo: 1000000, rate: 0.1 },
-  { upTo: 1200000, rate: 0.15 },
-  { upTo: 1500000, rate: 0.2 },
-  { upTo: Infinity, rate: 0.3 },
-];
-
-// Section caps (new regime: 80C & 80D minimal, but we track for the UI)
-const DEDUCTION_CAPS: Record<string, number> = {
-  '80C': 150000,
-  '80D': 25000,
+// Slab tables per financial year (new regime). A new FY = a data row, not a code change.
+const FY_SLABS: Record<string, Array<{ upTo: number; rate: number }>> = {
+  '2026-27': [
+    { upTo: 400000, rate: 0 },
+    { upTo: 800000, rate: 0.05 },
+    { upTo: 1200000, rate: 0.1 },
+    { upTo: 1600000, rate: 0.15 },
+    { upTo: 2000000, rate: 0.2 },
+    { upTo: 2400000, rate: 0.25 },
+    { upTo: Infinity, rate: 0.3 },
+  ],
 };
+
+// Section 87A: purely-rebatable income cap per FY (new regime).
+const FY_REBATE: Record<string, number> = {
+  '2026-27': 1200000,
+};
+
+// Deductions allowable under the new regime per FY. 80C is NOT deductible here.
+const FY_DEDUCTION_CAPS: Record<string, Record<string, number>> = {
+  '2026-27': { '80D': 25000 },
+};
+
+export const KNOWN_SECTIONS = ['80C', '80D'];
 
 function fyStartYear(d: Date): number {
   return d.getMonth() < 3 ? d.getFullYear() - 1 : d.getFullYear();
 }
 
-function slabTax(taxable: number): number {
+function slabTax(taxable: number, slabs: Array<{ upTo: number; rate: number }>, rebateLimit: number): number {
   let tax = 0;
   let prev = 0;
-  for (const slab of SLABS) {
+  for (const slab of slabs) {
     if (taxable <= prev) break;
     const bracket = Math.min(taxable, slab.upTo) - prev;
     tax += bracket * slab.rate;
     prev = slab.upTo;
   }
-  // section 87A rebate for taxable income <= 7L
-  if (taxable <= 700000) tax = 0;
+  // ponytail: 87A rebate approximated as "≤ cap → zero" (no marginal relief band above 12L)
+  if (taxable <= rebateLimit) tax = 0;
   return Math.floor(tax);
 }
 
@@ -45,8 +54,15 @@ export const indiaEngine: TaxEngine = {
   compute(input: TaxInput): TaxWorkspace {
     const notes: string[] = [];
 
-    const deductionsUsed = Object.keys(DEDUCTION_CAPS).map((section) => {
-      const cap = DEDUCTION_CAPS[section];
+    const slabs = FY_SLABS[input.fyKey] ?? FY_SLABS['2026-27'];
+    const caps = FY_DEDUCTION_CAPS[input.fyKey] ?? FY_DEDUCTION_CAPS['2026-27'];
+    const rebateLimit = FY_REBATE[input.fyKey] ?? FY_REBATE['2026-27'];
+    if (!FY_SLABS[input.fyKey]) {
+      notes.push(`Slab table not defined for ${input.fyKey} — showing FY 2026-27 new regime.`);
+    }
+
+    const deductionsUsed = Object.keys(caps).map((section) => {
+      const cap = caps[section];
       const used = Math.min(
         cap,
         input.deductions.filter((d) => d.section === section).reduce((s, d) => s + d.amount, 0),
@@ -54,17 +70,15 @@ export const indiaEngine: TaxEngine = {
       return { section, cap, used, remaining: Math.max(0, cap - used) };
     });
     const totalDeductible = deductionsUsed.reduce((s, d) => s + d.used, 0);
-    for (const d of deductionsUsed) {
-      if (d.remaining > 0 && d.section === '80C') {
-        notes.push(`Invest ${formatINR(d.remaining)} more under 80C to reach the cap.`);
-      }
-    }
 
-    const grossIncome = input.grossIncome - input.exemptIncome;
+    // exemptIncome was already excluded from grossIncome upstream — never subtract it again.
+    const grossIncome = input.grossIncome;
     const taxableIncome = Math.max(0, grossIncome - totalDeductible);
-    const incomeTax = slabTax(taxableIncome);
+    const incomeTax = slabTax(taxableIncome, slabs, rebateLimit);
 
-    // Capital gains: equity STCG 15%, LTCG 10% over 1.25L
+    // Capital gains: equity STCG 15%, LTCG 10% over 1.25L.
+    // ponytail: all classes taxed as equity; crypto (30%) / gold & MF (12.5%) are wrong.
+    // Upgrade: per-asset-class gain tax in the engine once asset class reaches TaxInput.
     let stcg = 0;
     let ltcgtaxable = 0;
     for (const g of input.realizedGains) {

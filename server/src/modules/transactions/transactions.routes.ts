@@ -57,8 +57,22 @@ async function assertOwnAccounts(userId: string, accountId: string, toAccountId?
   }
 }
 
+async function assertOwnCategory(userId: string, categoryId?: string | null) {
+  if (!categoryId) return;
+  const category = await prisma.category.findFirst({ where: { id: categoryId, userId } });
+  if (!category) throw new ApiError(400, 'Category not found');
+}
+
+const TXN_TYPES = ['income', 'expense', 'transfer', 'debt_repay', 'tax_event'];
+
 function toDto<T extends { tags: string }>(t: T) {
-  return { ...t, tags: JSON.parse(t.tags) };
+  let tags: string[] = [];
+  try {
+    tags = JSON.parse(t.tags);
+  } catch {
+    tags = [];
+  }
+  return { ...t, tags };
 }
 
 transactionsRouter.get(
@@ -67,8 +81,12 @@ transactionsRouter.get(
     const type = req.query.type as string | undefined;
     const categoryId = req.query.categoryId as string | undefined;
     const accountId = req.query.accountId as string | undefined;
+    if (type && !TXN_TYPES.includes(type)) throw new ApiError(400, 'Invalid transaction type');
     const from = req.query.from ? new Date(req.query.from as string) : undefined;
     const to = req.query.to ? new Date(req.query.to as string) : undefined;
+    if ((req.query.from && Number.isNaN(from!.getTime())) || (req.query.to && Number.isNaN(to!.getTime()))) {
+      throw new ApiError(400, 'Invalid from/to date');
+    }
 
     const transactions = await prisma.transaction.findMany({
       where: {
@@ -76,7 +94,7 @@ transactionsRouter.get(
         ...(type ? { type: type as never } : {}),
         ...(categoryId ? { categoryId } : {}),
         ...(accountId ? { accountId } : {}),
-        ...(from && to ? { date: { gte: from, lte: to } } : {}),
+        ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
       },
       include: { category: true, account: { select: { name: true, id: true } } },
       orderBy: { date: 'desc' },
@@ -90,6 +108,7 @@ transactionsRouter.post(
   validate(transactionSchema),
   asyncHandler(async (req, res) => {
     await assertOwnAccounts(req.userId!, req.body.accountId, req.body.toAccountId);
+    await assertOwnCategory(req.userId!, req.body.categoryId);
     const transaction = await prisma.transaction.create({
       data: {
         userId: req.userId!,
@@ -117,6 +136,7 @@ transactionsRouter.put(
     });
     if (!existing) throw new ApiError(404, 'Transaction not found');
     await assertOwnAccounts(req.userId!, req.body.accountId, req.body.toAccountId);
+    await assertOwnCategory(req.userId!, req.body.categoryId);
     const transaction = await prisma.transaction.update({
       where: { id: existing.id },
       data: {

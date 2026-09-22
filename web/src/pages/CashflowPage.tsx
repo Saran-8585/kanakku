@@ -43,10 +43,12 @@ export function CashflowPage() {
     onError: (err) => toast((err as Error).message, 'error'),
   });
 
-  if (isLoading || !data) return <main className="mx-auto max-w-3xl px-4 py-6">Loading…</main>;
+  if (isLoading) return <main className="mx-auto max-w-3xl px-4 py-6">Loading…</main>;
+  if (!data) return <main className="mx-auto max-w-3xl px-4 py-6">Could not load cashflow.</main>;
 
   const fy = data.fy;
   const transactions = txnsData?.transactions ?? [];
+  const isDebit = (t: Transaction) => t.type !== 'income' && t.type !== 'transfer';
 
   return (
     <main className="mx-auto max-w-3xl space-y-4 px-4 py-6">
@@ -130,10 +132,10 @@ export function CashflowPage() {
                 <div className="flex shrink-0 items-center gap-2">
                   <span
                     className={`text-sm font-medium ${
-                      t.type === 'income' ? 'text-emerald-400' : 'text-neutral-200'
+                      t.type === 'income' ? 'text-emerald-400' : isDebit(t) ? 'text-neutral-200' : 'text-neutral-500'
                     }`}
                   >
-                    {t.type === 'income' ? '+' : '−'}
+                    {t.type === 'income' ? '+' : isDebit(t) ? '−' : ''}
                     {fmt(t.amount)}
                   </span>
                   <button
@@ -144,7 +146,9 @@ export function CashflowPage() {
                     <Pencil size={14} />
                   </button>
                   <button
-                    onClick={() => remove.mutate(t.id)}
+                    onClick={() => {
+                      if (window.confirm('Delete this transaction?')) remove.mutate(t.id);
+                    }}
                     className="rounded p-1 text-neutral-600 opacity-0 transition group-hover:opacity-100 hover:text-red-400"
                     aria-label="Delete"
                   >

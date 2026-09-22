@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { localMonthKey } from '../../lib/dates.js';
 
 export async function getTransactionsForUser(userId: string, from?: Date, to?: Date) {
   const where = {
@@ -22,7 +23,7 @@ export interface CashflowBucket {
 }
 
 export function monthKey(d: Date): string {
-  return d.toISOString().slice(0, 7);
+  return localMonthKey(d);
 }
 
 export function monthLabel(key: string): string {
@@ -36,7 +37,6 @@ export interface CashflowSummary {
   net: number;
   savingsRate: number | null;
   byCategory: Array<{ categoryId: string | null; name: string; amount: number }>;
-  daily: Array<{ date: string; income: number; expense: number }>;
 }
 
 export function computeCashflow(
@@ -58,6 +58,9 @@ export function computeCashflow(
       expense += t.amount;
       const key = t.categoryId ?? 'uncategorized';
       byCategory.set(key, (byCategory.get(key) ?? 0) + t.amount);
+    } else if (t.type === 'debt_repay' || t.type === 'tax_event') {
+      // real outflows — keeps savings rate honest
+      expense += t.amount;
     }
   }
 
@@ -75,7 +78,6 @@ export function computeCashflow(
     net: income - expense,
     savingsRate: income > 0 ? ((income - expense) / income) * 100 : null,
     byCategory: categoryBreakdown,
-    daily: [],
   };
 }
 
@@ -95,7 +97,7 @@ export function monthlySeries(
     if (!buckets.has(key)) continue;
     const b = buckets.get(key)!;
     if (t.type === 'income') b.income += t.amount;
-    else if (t.type === 'expense') b.expense += t.amount;
+    else if (t.type === 'expense' || t.type === 'debt_repay' || t.type === 'tax_event') b.expense += t.amount;
   }
   for (const b of buckets.values()) b.net = b.income - b.expense;
   return [...buckets.values()];

@@ -22,27 +22,28 @@ export async function buyAsset(
   if (!asset) throw new ApiError(404, 'Asset not found');
 
   const date = data.date ?? new Date();
-  await prisma.lot.create({
-    data: {
-      assetId: asset.id,
-      qty: data.qty,
-      unitPrice: data.unitPrice,
-      fees: data.fees ?? 0,
-      date,
-      remainingQty: data.qty,
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.lot.create({
+      data: {
+        assetId: asset.id,
+        qty: data.qty,
+        unitPrice: data.unitPrice,
+        fees: data.fees ?? 0,
+        date,
+        remainingQty: data.qty,
+      },
+    });
+    await tx.trade.create({
+      data: {
+        assetId: asset.id,
+        action: 'buy',
+        qty: data.qty,
+        unitPrice: data.unitPrice,
+        fees: data.fees ?? 0,
+        date,
+      },
+    });
   });
-  await prisma.trade.create({
-    data: {
-      assetId: asset.id,
-      action: 'buy',
-      qty: data.qty,
-      unitPrice: data.unitPrice,
-      fees: data.fees ?? 0,
-      date,
-    },
-  });
-  await prisma.asset.update({ where: { id: asset.id }, data: { price: data.unitPrice, priceUpdatedAt: new Date() } });
 }
 
 export interface SellResult {
@@ -57,50 +58,50 @@ export async function sellAsset(
   const asset = await prisma.asset.findFirst({ where: { id: data.assetId, userId } });
   if (!asset) throw new ApiError(404, 'Asset not found');
 
-  const lots = await prisma.lot.findMany({
-    where: { assetId: asset.id, remainingQty: { gt: 0 } },
-    orderBy: { date: 'asc' },
-  });
-
-  let remaining = data.qty;
-  let proceeds = 0;
-  let cost = 0;
   const latestDate = data.date ?? new Date();
-  let earliestBuy: Date | null = null;
-
-  for (const lot of lots) {
-    if (remaining <= 0) break;
-    const take = Math.min(lot.remainingQty, remaining);
-    proceeds += take * data.unitPrice;
-    cost += take * lot.unitPrice + (data.fees ?? 0) * (take / data.qty);
-    earliestBuy = earliestBuy ?? lot.date;
-    await prisma.lot.update({
-      where: { id: lot.id },
-      data: { remainingQty: lot.remainingQty - take },
+  // ponytail: interactive txn serializes the FIFO loop; residual concurrent-sell race
+  // on shared lots remains (Prisma lacks FOR UPDATE without raw SQL). Upgrade: row lock
+  // via $queryRaw or a DB trigger enforcing remainingQty >= 0.
+  const { realizedGain, holdingPeriodDays } = await prisma.$transaction(async (tx) => {
+    const lots = await tx.lot.findMany({
+      where: { assetId: asset.id, remainingQty: { gt: 0 } },
+      orderBy: { date: 'asc' },
     });
-    remaining -= take;
-  }
 
-  if (remaining > 0) throw new ApiError(400, 'Insufficient holdings to sell');
+    let remaining = data.qty;
+    const slices: Array<{ gain: number; holdingPeriodDays: number }> = [];
+    for (const lot of lots) {
+      if (remaining <= 0) break;
+      const take = Math.min(lot.remainingQty, remaining);
+      const sliceCost = take * lot.unitPrice + (data.fees ?? 0) * (take / data.qty);
+      slices.push({
+        gain: take * data.unitPrice - sliceCost,
+        holdingPeriodDays: Math.max(0, Math.floor((latestDate.getTime() - lot.date.getTime()) / 86400000)),
+      });
+      await tx.lot.update({
+        where: { id: lot.id },
+        data: { remainingQty: lot.remainingQty - take },
+      });
+      remaining -= take;
+    }
 
-  const realizedGain = proceeds - cost;
-  const holdingPeriodDays = earliestBuy
-    ? Math.max(0, Math.floor((latestDate.getTime() - earliestBuy.getTime()) / 86400000))
-    : 0;
+    if (remaining > 0) throw new ApiError(400, 'Insufficient holdings to sell');
 
-  await prisma.trade.create({
-    data: {
-      assetId: asset.id,
-      action: 'sell',
-      qty: data.qty,
-      unitPrice: data.unitPrice,
-      fees: data.fees ?? 0,
-      date: latestDate,
-      realizedGain,
-      holdingPeriodDays,
-    },
+    const totalGain = slices.reduce((s, x) => s + x.gain, 0);
+    await tx.trade.create({
+      data: {
+        assetId: asset.id,
+        action: 'sell',
+        qty: data.qty,
+        unitPrice: data.unitPrice,
+        fees: data.fees ?? 0,
+        date: latestDate,
+        realizedGain: totalGain,
+        gainSplit: slices,
+      },
+    });
+    return { realizedGain: totalGain, holdingPeriodDays: Math.max(0, ...slices.map((s) => s.holdingPeriodDays)) };
   });
-  await prisma.asset.update({ where: { id: asset.id }, data: { price: data.unitPrice, priceUpdatedAt: new Date() } });
 
   return { realizedGain, holdingPeriodDays };
 }

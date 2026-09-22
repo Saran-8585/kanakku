@@ -143,7 +143,7 @@ async function main() {
         ['Utilities', 2500],
         ['Subscriptions', 1200],
       ];
-      for (const [cat, amt] of expenses) {
+      for (const [i, [cat, amt]] of expenses.entries()) {
         const category = await prisma.category.findUnique({
           where: { userId_name: { userId: user.id, name: cat } },
         });
@@ -154,7 +154,7 @@ async function main() {
             type: 'expense',
             categoryId: category?.id,
             amount: amt,
-            date: iso(m, 5 + expenses.indexOf([cat, amt]) * 3),
+            date: iso(m, 5 + i * 3),
             note: cat,
           },
         });
